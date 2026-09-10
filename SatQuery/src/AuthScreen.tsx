@@ -6,6 +6,21 @@ import './auth.css'
 
 type AuthScreenProps = { onDemo: () => void }
 
+function authMessage(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  const messages: Record<string, string> = {
+    'auth/email-already-in-use': 'This email already has an account. Switch to Sign in.',
+    'auth/invalid-email': 'Enter a valid email address.',
+    'auth/weak-password': 'Use a password with at least 6 characters.',
+    'auth/invalid-credential': 'Email or password is incorrect.',
+    'auth/operation-not-allowed': 'Email/Password sign-in is not enabled in Firebase Console.',
+    'auth/invalid-api-key': 'Firebase API key is invalid. Check Vercel Environment Variables.',
+    'auth/unauthorized-domain': 'This Vercel domain is not authorized in Firebase Authentication settings.',
+    'auth/network-request-failed': 'Network request failed. Check your connection and try again.',
+  }
+  return messages[code] || (error instanceof Error ? error.message : 'Authentication failed. Check Firebase settings.')
+}
+
 export default function AuthScreen({ onDemo }: AuthScreenProps) {
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
@@ -38,8 +53,7 @@ export default function AuthScreen({ onDemo }: AuthScreenProps) {
         }
       }
     } catch (firebaseError) {
-      const code = firebaseError instanceof Error ? firebaseError.message : 'Authentication failed.'
-      setError(code.replace('Firebase: ', '').replace(/\s*\([^)]*\)/, ''))
+      setError(authMessage(firebaseError))
     } finally {
       setBusy(false)
     }
@@ -55,8 +69,7 @@ export default function AuthScreen({ onDemo }: AuthScreenProps) {
       await sendPasswordResetEmail(auth, email)
       setNotice('Password reset email sent. Check your inbox for the secure link.')
     } catch (firebaseError) {
-      const code = firebaseError instanceof Error ? firebaseError.message : 'Password reset failed.'
-      setError(code.replace('Firebase: ', '').replace(/\s*\([^)]*\)/, ''))
+      setError(authMessage(firebaseError))
     } finally {
       setBusy(false)
     }
