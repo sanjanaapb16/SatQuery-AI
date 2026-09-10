@@ -1,75 +1,32 @@
-# SatQuery AI
+# React + TypeScript + Vite
 
-**Ask the Satellite. Get the Evidence.**
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
-SatQuery AI is a GeoAI interface for asking natural-language questions of satellite imagery. This repository contains a responsive React command center and a FastAPI inference contract with an explicit demo/fallback adapter.
+Currently, two official plugins are available:
 
-## Included
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-- Command-center dashboard with analytics, workflows, and responsive navigation
-- Signature 2023/2025 optical + SAR multi-temporal demo
-- Query composer with suggested questions and expert mode affordance
-- Synthetic evidence map with change regions, coordinates, source stack, confidence, and audit trace
-- Analysis history view
-- FastAPI routes for orchestration, VQA, change detection, optical/SAR fusion, uploads, and health
-- Query routing for Change, Grounding, GIS, Anomaly, VQA, and Optical-SAR Fusion agents
-- Firebase-ready `.env.example`, Firestore rules, and Storage rules
-- Clear demo fallback labeling; no fabricated live satellite claims
+## React Compiler
 
-## Local development
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-```powershell
-npm install
-npm run dev
+## Expanding the Oxlint configuration
+
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
 ```
 
-Frontend: `http://localhost:5173`
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload --port 8000
-```
-
-Backend API: `http://localhost:8000/api/health`
-
-## Firebase setup
-
-1. Create a Firebase project.
-2. Enable Email/Password and Google Authentication.
-3. Create Firestore and Storage.
-4. Register a web application and copy its public web configuration into `.env` using `.env.example`.
-5. Deploy `firestore.rules` and `storage.rules` with the Firebase CLI.
-6. Keep Admin credentials backend-only. Never add service-account JSON or private keys to the frontend.
-
-The current UI works in demo mode without Firebase credentials. Add a Firebase service layer before enabling production auth and persistence.
-
-## Architecture
-
-```text
-React + TypeScript + Vite
-        |
-        | Firebase Auth / Firestore / Storage (production wiring)
-        v
-FastAPI orchestration API
-        |
-Query router -> specialist agents -> model adapters -> geospatial processing
-        |
-Evidence + confidence + execution trace
-```
-
-Large models should be plugged into the adapter boundary in the backend. The current adapter returns clearly labeled demo output and should not be presented as a trained benchmark model.
-
-## API
-
-- `GET /api/health`
-- `POST /api/analyze`
-- `POST /api/vqa`
-- `POST /api/change-detection`
-- `POST /api/optical-sar`
-- `POST /api/upload-metadata`
-
-## Known limitations
-
-The demo uses a synthetic map and fallback result so the product can be evaluated without large model weights or restricted imagery. GeoTIFF CRS/bounds extraction, Firebase token verification, real model adapters, report generation, and live alert ingestion are the next backend slices.
+See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
