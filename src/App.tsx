@@ -7,6 +7,8 @@ import {
   BarChart3,
   Building2,
   CheckCircle2,
+  Eye,
+  EyeOff,
   FileText,
   Gauge,
   Globe,
@@ -38,6 +40,7 @@ import {
   YAxis,
 } from 'recharts'
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import { Circle, MapContainer, Marker, Polygon, Popup, TileLayer, useMapEvents } from 'react-leaflet'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { imageService } from './services/imageService'
 import { runAnalysis } from './services/analysisService'
@@ -74,6 +77,25 @@ const demoUser = {
 
 const chartColors = ['#60a5fa', '#34d399', '#a78bfa', '#fbbf24', '#f87171', '#67e8f9']
 
+function estimatePolygonAreaKm2(points: Array<[number, number]>) {
+  if (points.length < 3) {
+    return 0
+  }
+
+  const radians = points.map(([lat, lng]) => [lat * (Math.PI / 180), lng * (Math.PI / 180)] as const)
+
+  let area = 0
+
+  for (let index = 0; index < radians.length; index += 1) {
+    const [lat1, lng1] = radians[index]
+    const [lat2, lng2] = radians[(index + 1) % radians.length]
+    area += lng1 * lat2 - lng2 * lat1
+  }
+
+  const absArea = Math.abs(area) / 2
+  return absArea * 6371 * 6371
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -89,7 +111,9 @@ function SatQueryApp() {
   const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [fullName, setFullName] = useState('')
+  const [profile, setProfile] = useState<typeof demoUser>({ ...demoUser })
   const [authError, setAuthError] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
@@ -102,6 +126,7 @@ function SatQueryApp() {
   const [isUploading, setIsUploading] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
   const [history, setHistory] = useState<AnalysisHistoryItem[]>([])
+  const [aoiPoints, setAoiPoints] = useState<Array<[number, number]>>([])
   const [isListening, setIsListening] = useState(false)
   const [voiceError, setVoiceError] = useState('')
   const [voiceSupported, setVoiceSupported] = useState(false)
@@ -171,6 +196,33 @@ function SatQueryApp() {
       window.speechSynthesis?.cancel()
     }
   }, [])
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!session?.user) {
+        setProfile({ ...demoUser })
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('full_name, email, organization')
+        .eq('user_id', session.user.id)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Failed to load profile:', error)
+      }
+
+      setProfile({
+        full_name: data?.full_name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || demoUser.full_name,
+        email: data?.email || session.user.email || demoUser.email,
+        organization: data?.organization || 'Authenticated User',
+      })
+    }
+
+    void loadProfile()
+  }, [session])
 
   const latestMode = useMemo(
     () => modeOptions.find((option) => option.key === analysisMode) ?? modeOptions[0],
@@ -253,6 +305,14 @@ function SatQueryApp() {
     setImages((current) => current.filter((image) => image.id !== id))
   }
 
+  const updateImageGeoMetadata = (
+    patch: Partial<Pick<UploadedImage, 'latitude' | 'longitude' | 'zoom' | 'regionName' | 'geospatialSource'>>,
+  ) => {
+    setImages((current) =>
+      current.map((image, index) => (index === 0 ? { ...image, ...patch } : image)),
+    )
+  }
+
   const handleAnalyze = async () => {
     if (!query.trim()) {
       window.alert('Please enter a question before running analysis.')
@@ -295,6 +355,7 @@ function SatQueryApp() {
       return
     }
 
+    const aoiAreaKm2 = estimatePolygonAreaKm2(aoiPoints)
     const pdf = new jsPDF()
 
     pdf.setFillColor(15, 23, 42)
@@ -336,6 +397,20 @@ function SatQueryApp() {
     analysisResult.recommendations.forEach((item, index) => {
       pdf.text(` ${item}`, 18, 238 + index * 8, { maxWidth: 170 })
     })
+
+    if (aoiPoints.length >= 3) {
+      const lineStart = 270
+      pdf.setFont('helvetica', 'bold')
+      pdf.text('AOI Geometry', 14, lineStart)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text(`Estimated Area: ${aoiAreaKm2.toFixed(2)} km²`, 18, lineStart + 10)
+      pdf.text(
+        `Points: ${aoiPoints.map(([lat, lng]) => `${lat.toFixed(4)}, ${lng.toFixed(4)}`).join(' | ')}`,
+        18,
+        lineStart + 18,
+        { maxWidth: 170 },
+      )
+    }
 
     pdf.save(`satquery-ai-report-${Date.now()}.pdf`)
   }
@@ -405,7 +480,11 @@ function SatQueryApp() {
       return
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    const redirectTo = `${window.location.origin}/`
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    })
 
     if (error) {
       setAuthError(error.message)
@@ -413,6 +492,34 @@ function SatQueryApp() {
     }
 
     setAuthMessage('Password reset email sent successfully.')
+  }
+
+  const handleProfileSave = async ({ full_name, organization }: { full_name: string; organization: string }) => {
+    if (!session?.user) {
+      return
+    }
+
+    const { error } = await supabase.from('profiles').upsert(
+      {
+        user_id: session.user.id,
+        full_name,
+        email: session.user.email || profile.email,
+        organization,
+        avatar_url: null,
+      },
+      { onConflict: 'user_id' },
+    )
+
+    if (error) {
+      throw error
+    }
+
+    setProfile((current) => ({
+      ...current,
+      full_name,
+      organization,
+      email: session.user.email || current.email,
+    }))
   }
 
   const handleSignOut = async () => {
@@ -430,6 +537,8 @@ function SatQueryApp() {
         setEmail={setEmail}
         password={password}
         setPassword={setPassword}
+        showPassword={showPassword}
+        setShowPassword={setShowPassword}
         fullName={fullName}
         setFullName={setFullName}
         authError={authError}
@@ -533,6 +642,7 @@ function SatQueryApp() {
                 isUploading={isUploading}
                 addFiles={addFiles}
                 removeImage={removeImage}
+                updateImageGeoMetadata={updateImageGeoMetadata}
                 handleAnalyze={handleAnalyze}
                 handleDownloadReport={handleDownloadReport}
                 analysisResult={analysisResult}
@@ -548,12 +658,14 @@ function SatQueryApp() {
                 stopVoiceAnswer={stopVoiceAnswer}
                 selectedLanguage={selectedLanguage}
                 setSelectedLanguage={setSelectedLanguage}
+                aoiPoints={aoiPoints}
+                setAoiPoints={setAoiPoints}
               />
             }
           />
           <Route path="/history" element={<HistoryPage history={history} />} />
           <Route path="/reports" element={<ReportsPage analysisResult={analysisResult} query={query} />} />
-          <Route path="/profile" element={<ProfilePage user={session?.user ? { full_name: session.user.user_metadata?.full_name || 'Supabase User', email: session.user.email || '', organization: 'Authenticated User' } : demoUser} />} />
+          <Route path="/profile" element={<ProfilePage user={profile} onSave={handleProfileSave} />} />
         </Routes>
       </main>
     </div>
@@ -561,6 +673,39 @@ function SatQueryApp() {
 }
 
 function HomePage({ session }: { session: Session | null }) {
+  const extraFeatures = [
+    {
+      title: 'Interactive Satellite Map',
+      description: 'Pan, zoom, and view live satellite imagery with AI-grounded overlays.',
+      icon: <MapPinned className="h-5 w-5 text-blue-400" />,
+    },
+    {
+      title: 'AI Change Heatmap',
+      description: 'Spot surface changes and compare before/after scenes with clear visual indicators.',
+      icon: <BarChart3 className="h-5 w-5 text-emerald-400" />,
+    },
+    {
+      title: 'Object Highlighting',
+      description: 'Ask for buildings, water bodies, roads, and other targets to highlight them instantly.',
+      icon: <Building2 className="h-5 w-5 text-violet-400" />,
+    },
+    {
+      title: 'Land Cover Classification',
+      description: 'Classify water, vegetation, agriculture, urban areas, and more from the same image.',
+      icon: <Layers3 className="h-5 w-5 text-cyan-400" />,
+    },
+    {
+      title: 'Optical vs SAR Comparison',
+      description: 'Combine optical imagery with radar analysis for richer geospatial interpretation.',
+      icon: <Globe className="h-5 w-5 text-blue-400" />,
+    },
+    {
+      title: 'Voice & Multilingual Support',
+      description: 'Use voice commands and multilingual responses for faster, more natural analysis.',
+      icon: <Mic className="h-5 w-5 text-pink-400" />,
+    },
+  ]
+
   return (
     <div className="space-y-8 pb-10">
       <section className="overflow-hidden rounded-[2rem] border border-slate-800 bg-gradient-to-br from-slate-900 via-blue-950/80 to-violet-950/80 p-8 shadow-2xl shadow-blue-950/40 md:p-10">
@@ -625,9 +770,29 @@ function HomePage({ session }: { session: Session | null }) {
           icon={<FileText className="h-5 w-5 text-emerald-400" />}
         />
       </section>
+
+      <section className="rounded-[2rem] border border-slate-800 bg-slate-900/70 p-6">
+        <div className="mb-5">
+          <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Extra Features</p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">Additional capabilities included in the same blue theme</h2>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {extraFeatures.map((feature) => (
+            <div key={feature.title} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+              <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 border border-slate-700">
+                {feature.icon}
+              </div>
+              <h3 className="text-lg font-semibold text-white">{feature.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-300">{feature.description}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
+
 
 function FeatureCard({ title, description, icon }: { title: string; description: string; icon: ReactNode }) {
   return (
@@ -651,6 +816,7 @@ function DashboardPage({
   isUploading,
   addFiles,
   removeImage,
+  updateImageGeoMetadata,
   handleAnalyze,
   handleDownloadReport,
   analysisResult,
@@ -666,6 +832,8 @@ function DashboardPage({
   stopVoiceAnswer,
   selectedLanguage,
   setSelectedLanguage,
+  aoiPoints,
+  setAoiPoints,
 }: {
   analysisMode: AnalysisMode
   setAnalysisMode: (mode: AnalysisMode) => void
@@ -676,6 +844,9 @@ function DashboardPage({
   isUploading: boolean
   addFiles: (fileList: FileList | null) => Promise<void>
   removeImage: (id: string) => void
+  updateImageGeoMetadata: (
+    patch: Partial<Pick<UploadedImage, 'latitude' | 'longitude' | 'zoom' | 'regionName' | 'geospatialSource'>>,
+  ) => void
   handleAnalyze: () => Promise<void> | void
   handleDownloadReport: () => void
   analysisResult: AnalysisResult | null
@@ -691,7 +862,31 @@ function DashboardPage({
   stopVoiceAnswer: () => void
   selectedLanguage: 'en' | 'es' | 'fr'
   setSelectedLanguage: (language: 'en' | 'es' | 'fr') => void
+  aoiPoints: Array<[number, number]>
+  setAoiPoints: React.Dispatch<React.SetStateAction<Array<[number, number]>>>
 }) {
+  const currentGeo = images[0] ?? {
+    latitude: 20.5937,
+    longitude: 78.9629,
+    zoom: 2,
+    regionName: 'Scene Overview',
+    geospatialSource: 'manual',
+  }
+
+  const [mapLayers, setMapLayers] = useState({
+    showSatellite: true,
+    showDetectedObjects: true,
+    showAOI: true,
+    showHeatmap: true,
+  })
+
+  const toggleMapLayer = (key: keyof typeof mapLayers) => {
+    setMapLayers((current) => ({
+      ...current,
+      [key]: !current[key],
+    }))
+  }
+
   const landCoverData = analysisResult?.land_cover_result ?? [
     { label: 'Agriculture', percentage: 38.4, color: '#34d399' },
     { label: 'Forest', percentage: 24.2, color: '#22c55e' },
@@ -847,27 +1042,15 @@ function DashboardPage({
 
           {analysisResult && (
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
-              <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-slate-200"><MapPinned className="h-4 w-4 text-blue-400" /> Interactive Satellite Map</div>
-                  <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-blue-300">Live Overlay</span>
-                </div>
-                <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
-                  <img src={images[0]?.localUrl} alt="Satellite map preview" className="h-52 w-full object-cover opacity-90" />
-                  {analysisResult.detected_objects.slice(0, 5).map((object) => (
-                    <div
-                      key={`map-${object.id}`}
-                      className="absolute rounded-lg border border-violet-300 bg-violet-400/15"
-                      style={{
-                        left: `${Math.min(Math.max((object.x / 100) * 100, 4), 94)}%`,
-                        top: `${Math.min(Math.max((object.y / 100) * 100, 8), 84)}%`,
-                        width: `${Math.min(Math.max((object.width / 100) * 100, 10), 26)}%`,
-                        height: `${Math.min(Math.max((object.height / 100) * 100, 10), 22)}%`,
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
+              <MapPreviewPanel
+                detectedObjects={analysisResult.detected_objects}
+                imageName={images[0]?.name ?? 'Satellite scene'}
+                geo={currentGeo}
+                layerConfig={mapLayers}
+                onToggleLayer={toggleMapLayer}
+                aoiPoints={aoiPoints}
+                onAoiChange={setAoiPoints}
+              />
 
               <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
                 <div className="mb-3 flex items-center justify-between">
@@ -896,12 +1079,59 @@ function DashboardPage({
 
           <div className="mt-6 grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-              <div className="mb-2 flex items-center gap-2 text-slate-300"><MapPinned className="h-4 w-4" /> Location</div>
-              <p className="text-sm text-slate-400">No geospatial metadata supplied  automatic map placement is optional</p>
+              <div className="mb-2 flex items-center gap-2 text-slate-300"><MapPinned className="h-4 w-4" /> Geospatial Alignment</div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <label className="space-y-1 text-slate-300">
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Latitude</span>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={currentGeo.latitude ?? 20.5937}
+                    onChange={(event) =>
+                      updateImageGeoMetadata({ latitude: Number(event.target.value) || 20.5937 })
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100 outline-none focus:border-blue-500"
+                  />
+                </label>
+                <label className="space-y-1 text-slate-300">
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Longitude</span>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={currentGeo.longitude ?? 78.9629}
+                    onChange={(event) =>
+                      updateImageGeoMetadata({ longitude: Number(event.target.value) || 78.9629 })
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100 outline-none focus:border-blue-500"
+                  />
+                </label>
+                <label className="space-y-1 text-slate-300">
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Zoom</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={18}
+                    value={currentGeo.zoom ?? 2}
+                    onChange={(event) => updateImageGeoMetadata({ zoom: Number(event.target.value) || 2 })}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100 outline-none focus:border-blue-500"
+                  />
+                </label>
+                <label className="space-y-1 text-slate-300">
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Region</span>
+                  <input
+                    type="text"
+                    value={currentGeo.regionName ?? 'Scene Overview'}
+                    onChange={(event) =>
+                      updateImageGeoMetadata({ regionName: event.target.value || 'Scene Overview' })
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100 outline-none focus:border-blue-500"
+                  />
+                </label>
+              </div>
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
               <div className="mb-2 flex items-center gap-2 text-slate-300"><Layers3 className="h-4 w-4" /> AI Workflow</div>
-              <p className="text-sm text-slate-400">Preprocess ? Extract features ? Detect objects ? Generate evidence</p>
+              <p className="text-sm text-slate-400">Preprocess → Align geospatial metadata → Detect objects → Generate evidence</p>
             </div>
           </div>
         </section>
@@ -1167,6 +1397,192 @@ function DashboardPage({
   )
 }
 
+function MapPreviewPanel({
+  detectedObjects,
+  imageName,
+  geo,
+  layerConfig,
+  onToggleLayer,
+  aoiPoints,
+  onAoiChange,
+}: {
+  detectedObjects: AnalysisResult['detected_objects']
+  imageName: string
+  geo?: Partial<UploadedImage>
+  layerConfig?: {
+    showSatellite: boolean
+    showDetectedObjects: boolean
+    showAOI: boolean
+    showHeatmap: boolean
+  }
+  onToggleLayer?: (key: 'showSatellite' | 'showDetectedObjects' | 'showAOI' | 'showHeatmap') => void
+  aoiPoints?: Array<[number, number]>
+  onAoiChange?: (points: Array<[number, number]>) => void
+}) {
+  const [isDrawingAoi, setIsDrawingAoi] = useState(false)
+
+  const center: [number, number] = [geo?.latitude ?? 20.5937, geo?.longitude ?? 78.9629]
+  const zoom = geo?.zoom ?? 2
+  const showSatellite = layerConfig?.showSatellite ?? true
+  const showDetectedObjects = layerConfig?.showDetectedObjects ?? true
+  const showAOI = layerConfig?.showAOI ?? true
+  const showHeatmap = layerConfig?.showHeatmap ?? true
+  const normalizedAoiPoints = aoiPoints ?? []
+  const aoiAreaKm2 = useMemo(() => estimatePolygonAreaKm2(normalizedAoiPoints), [normalizedAoiPoints])
+
+  const overlayPolygon: Array<[number, number]> = normalizedAoiPoints.length >= 3
+    ? normalizedAoiPoints
+    : detectedObjects.length
+      ? [
+          [center[0] - 0.9, center[1] - 1.6],
+          [center[0] + 0.9, center[1] - 1.2],
+          [center[0] + 1.1, center[1] + 1.6],
+          [center[0] - 0.6, center[1] + 1.8],
+        ]
+      : []
+
+  const MapAoiController = () => {
+    useMapEvents({
+      click(event) {
+        if (!isDrawingAoi) {
+          return
+        }
+
+        const nextPoints = [...normalizedAoiPoints, [event.latlng.lat, event.latlng.lng] as [number, number]]
+        onAoiChange?.(nextPoints)
+      },
+    })
+
+    return null
+  }
+
+  return (
+    <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-slate-200">
+          <MapPinned className="h-4 w-4 text-blue-400" /> Interactive Satellite Map
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-blue-300">
+            {geo?.regionName ?? 'Map Preview'}
+          </span>
+          {normalizedAoiPoints.length >= 3 && (
+            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-emerald-300">
+              AOI ~ {aoiAreaKm2.toFixed(2)} km²
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        {[
+          { key: 'showSatellite', label: 'Satellite' },
+          { key: 'showHeatmap', label: 'Heatmap' },
+          { key: 'showAOI', label: 'AOI' },
+          { key: 'showDetectedObjects', label: 'Objects' },
+        ].map((toggle) => {
+          const active = layerConfig?.[toggle.key as keyof typeof layerConfig] ?? true
+          return (
+            <button
+              key={toggle.key}
+              type="button"
+              onClick={() => onToggleLayer?.(toggle.key as 'showSatellite' | 'showDetectedObjects' | 'showAOI' | 'showHeatmap')}
+              className={`rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.2em] ${
+                active
+                  ? 'border-blue-500/50 bg-blue-500/10 text-blue-200'
+                  : 'border-slate-700 bg-slate-950 text-slate-400'
+              }`}
+            >
+              {toggle.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setIsDrawingAoi((current) => !current)}
+          className={`rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.2em] ${
+            isDrawingAoi
+              ? 'border-amber-500/50 bg-amber-500/10 text-amber-200'
+              : 'border-slate-700 bg-slate-950 text-slate-400'
+          }`}
+        >
+          {isDrawingAoi ? 'Stop Drawing AOI' : 'Draw AOI'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onAoiChange?.([])
+            setIsDrawingAoi(false)
+          }}
+          className="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.2em] text-slate-400"
+        >
+          Clear AOI
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+        <div className="h-52 w-full">
+          <MapContainer center={center} zoom={zoom} scrollWheelZoom className="h-full w-full">
+            <MapAoiController />
+            {showSatellite && (
+              <TileLayer
+                attribution='Tiles &copy; Esri, OpenStreetMap contributors'
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              />
+            )}
+            {showAOI && overlayPolygon.length > 0 && (
+              <Polygon
+                positions={overlayPolygon}
+                pathOptions={{ color: '#60a5fa', fillColor: '#60a5fa', fillOpacity: 0.17, weight: 1.5 }}
+              />
+            )}
+            {showHeatmap &&
+              detectedObjects.slice(0, 5).map((object, index) => {
+                const lat = center[0] + (index % 2 === 0 ? 0.55 : -0.35) + (index + 1) * 0.12
+                const lng = center[1] + (index % 2 === 0 ? 0.65 : -0.45) + (index + 1) * 0.18
+                const radius = Math.max(18000, Math.min(85000, object.confidence * 900))
+
+                return (
+                  <Circle
+                    key={`${object.id}-heatmap`}
+                    center={[lat, lng]}
+                    radius={radius}
+                    pathOptions={{
+                      color: '#67e8f9',
+                      fillColor: '#67e8f9',
+                      fillOpacity: 0.18,
+                      weight: 1.5,
+                    }}
+                  />
+                )
+              })}
+            {showDetectedObjects &&
+              detectedObjects.slice(0, 5).map((object, index) => {
+                const lat = center[0] + (index % 2 === 0 ? 0.55 : -0.35) + (index + 1) * 0.12
+                const lng = center[1] + (index % 2 === 0 ? 0.65 : -0.45) + (index + 1) * 0.18
+
+                return (
+                  <Marker key={`${object.id}-marker`} position={[lat, lng]}>
+                    <Popup>
+                      <div className="text-sm text-slate-700">
+                        <p className="font-semibold">{object.label}</p>
+                        <p>{imageName}</p>
+                        <p className="text-xs text-slate-500">Confidence: {object.confidence}%</p>
+                      </div>
+                    </Popup>
+                  </Marker>
+                )
+              })}
+          </MapContainer>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function HistoryPage({ history }: { history: AnalysisHistoryItem[] }) {
   return (
     <div className="panel">
@@ -1233,16 +1649,130 @@ function ReportsPage({ analysisResult, query }: { analysisResult: AnalysisResult
   )
 }
 
-function ProfilePage({ user }: { user: typeof demoUser }) {
+function ProfilePage({ user, onSave }: { user: typeof demoUser; onSave?: (profile: { full_name: string; organization: string }) => Promise<void> | void }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [formData, setFormData] = useState(user)
+
+  useEffect(() => {
+    setFormData(user)
+  }, [user])
+
+  const handleSave = async () => {
+    if (!onSave) {
+      setIsEditing(false)
+      return
+    }
+
+    try {
+      await onSave({
+        full_name: formData.full_name,
+        organization: formData.organization,
+      })
+      setIsEditing(false)
+    } catch (error) {
+      console.error('Failed to save profile', error)
+      window.alert(error instanceof Error ? error.message : 'Failed to update profile.')
+    }
+  }
+
   return (
-    <div className="panel max-w-3xl">
-      <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Profile</p>
-      <h2 className="mt-2 text-2xl font-semibold text-white">User Profile</h2>
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <InfoBlock label="Full Name" value={user.full_name} />
-        <InfoBlock label="Email" value={user.email} />
-        <InfoBlock label="Organization" value={user.organization} />
-        <InfoBlock label="Authentication" value="Supabase Auth Ready" />
+    <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="rounded-[2rem] border border-blue-500/20 bg-[radial-gradient(circle_at_top,_rgba(96,165,250,0.18),_transparent_30%),linear-gradient(180deg,rgba(10,24,42,0.96),rgba(8,18,32,0.96))] p-6 shadow-[0_30px_80px_rgba(2,12,26,0.7)] md:p-8">
+        <div className="mb-6 flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.32em] text-blue-300">Profile</p>
+            <h2 className="mt-2 text-3xl font-semibold text-white">Account Settings</h2>
+          </div>
+
+          {!isEditing ? (
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="rounded-full bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-500/30"
+            >
+              Edit profile
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                className="rounded-full bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-500/30"
+              >
+                Save changes
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="rounded-[1.5rem] border border-blue-500/20 bg-slate-950/60 p-5">
+            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-violet-500 text-2xl font-semibold text-white shadow-lg shadow-blue-500/30">
+              {user.full_name.charAt(0).toUpperCase()}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Workspace</p>
+              <h3 className="text-xl font-semibold text-white">{user.full_name}</h3>
+              <p className="text-sm text-slate-300">{user.organization}</p>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Status</p>
+              <div className="mt-2 flex items-center gap-2 text-sm text-emerald-300">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                Supabase Auth Ready
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {isEditing ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <label className="mb-2 block text-sm text-slate-300">Full Name</label>
+                  <input
+                    value={formData.full_name}
+                    onChange={(event) => setFormData((current) => ({ ...current, full_name: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <label className="mb-2 block text-sm text-slate-300">Email</label>
+                  <input
+                    value={formData.email}
+                    disabled
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-slate-400"
+                  />
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <label className="mb-2 block text-sm text-slate-300">Organization</label>
+                  <input
+                    value={formData.organization}
+                    onChange={(event) => setFormData((current) => ({ ...current, organization: event.target.value }))}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                <InfoBlock label="Full Name" value={user.full_name} />
+                <InfoBlock label="Email" value={user.email} />
+                <InfoBlock label="Organization" value={user.organization} />
+                <InfoBlock label="Authentication" value="Supabase Auth Ready" />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -1255,6 +1785,8 @@ function AuthScreen({
   setEmail,
   password,
   setPassword,
+  showPassword,
+  setShowPassword,
   fullName,
   setFullName,
   authError,
@@ -1269,6 +1801,8 @@ function AuthScreen({
   setEmail: (value: string) => void
   password: string
   setPassword: (value: string) => void
+  showPassword: boolean
+  setShowPassword: (value: boolean) => void
   fullName: string
   setFullName: (value: string) => void
   authError: string
@@ -1336,13 +1870,23 @@ function AuthScreen({
 
               <div>
                 <label className="mb-1 block text-sm text-slate-300">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm outline-none focus:border-blue-500"
-                  placeholder=""
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 pr-11 text-sm outline-none focus:border-blue-500"
+                    placeholder=""
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-200"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               {authError && (

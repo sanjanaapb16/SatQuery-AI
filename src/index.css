@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'leaflet/dist/leaflet.css';
 
 :root {
   color-scheme: dark;
@@ -20,20 +21,22 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top, rgba(59, 130, 246, 0.2), transparent 30%),
-    linear-gradient(180deg, #020817 0%, #0f172a 100%);
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.2), transparent 26%),
+    radial-gradient(circle at right bottom, rgba(59, 130, 246, 0.14), transparent 28%),
+    linear-gradient(180deg, #020b1d 0%, #07172b 48%, #0a1f36 100%);
   color: #e2e8f0;
 }
 
 #root {
   min-height: 100vh;
+  background: transparent;
 }
 
 .panel {
-  border: 1px solid rgba(51, 65, 85, 0.9);
-  background: rgba(15, 23, 42, 0.76);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  background: rgba(10, 24, 42, 0.82);
   border-radius: 1.5rem;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.45);
+  box-shadow: 0 12px 36px rgba(2, 12, 26, 0.52);
   padding: 1.25rem;
   backdrop-filter: blur(18px);
 }

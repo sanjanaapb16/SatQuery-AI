@@ -21,6 +21,11 @@ export interface UploadedImage {
   uploadedAt: string
   width?: number
   height?: number
+  latitude?: number
+  longitude?: number
+  zoom?: number
+  regionName?: string
+  geospatialSource?: 'manual' | 'auto' | 'none'
 }
 
 export interface AnalysisStep {

@@ -18,6 +18,24 @@ SatQuery AI is a production-style web application for remote sensing image analy
 - Backend: Supabase Auth, Supabase Storage, Supabase Edge Functions, PostgreSQL
 - AI layer: OpenAI-compatible API via server-side Edge Function
 
+## Datasets and Benchmarks
+
+### BigEarthNet
+- Primary open-source dataset for remote-sensing adaptation.
+- Contains co-registered Sentinel-1 SAR and Sentinel-2 multispectral imagery.
+- Useful for fine-tuning or expanding the model's understanding of land cover, scene categories, and geospatial patterns.
+- Reference: https://arxiv.org/abs/2603.29630
+
+### VRSBench
+- Public evaluation benchmark for vision-language tasks in remote sensing.
+- Useful for validating model performance on image understanding, visual question answering, and geospatial reasoning tasks.
+- Helps compare different model versions and demonstrate benchmark-based evaluation results.
+
+### Project usage
+- BigEarthNet can be used for training or fine-tuning the remote-sensing understanding layer.
+- VRSBench can be used for benchmark evaluation and reporting model performance.
+- These datasets are open source and suitable for research-oriented improvements to the underlying AI capability behind SatQuery AI.
+
 ## Local setup
 
 1. Install dependencies:
