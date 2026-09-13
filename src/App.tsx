@@ -1040,10 +1040,10 @@ function DashboardPage({
             )}
           </div>
 
-          {analysisResult && (
+          {(images.length > 0 || analysisResult) && (
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
               <MapPreviewPanel
-                detectedObjects={analysisResult.detected_objects}
+                detectedObjects={analysisResult?.detected_objects ?? []}
                 imageName={images[0]?.name ?? 'Satellite scene'}
                 geo={currentGeo}
                 layerConfig={mapLayers}
@@ -1052,28 +1052,30 @@ function DashboardPage({
                 onAoiChange={setAoiPoints}
               />
 
-              <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-slate-200"><BarChart3 className="h-4 w-4 text-emerald-400" /> AI Change Heatmap</div>
-                  <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-emerald-300">Change Index</span>
-                </div>
-                <div className="space-y-3">
-                  {analysisResult.detected_changes.map((change) => (
-                    <div key={change.id}>
-                      <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
-                        <span>{change.label}</span>
-                        <span className={change.magnitude >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{change.magnitude}%</span>
+              {analysisResult && (
+                <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-slate-200"><BarChart3 className="h-4 w-4 text-emerald-400" /> AI Change Heatmap</div>
+                    <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-emerald-300">Change Index</span>
+                  </div>
+                  <div className="space-y-3">
+                    {analysisResult.detected_changes.map((change) => (
+                      <div key={change.id}>
+                        <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
+                          <span>{change.label}</span>
+                          <span className={change.magnitude >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{change.magnitude}%</span>
+                        </div>
+                        <div className="h-2.5 overflow-hidden rounded-full bg-slate-800">
+                          <div
+                            className={`h-full rounded-full ${change.magnitude >= 0 ? 'bg-gradient-to-r from-emerald-400 to-cyan-400' : 'bg-gradient-to-r from-rose-400 to-orange-400'}`}
+                            style={{ width: `${Math.min(Math.abs(change.magnitude) * 8, 100)}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-800">
-                        <div
-                          className={`h-full rounded-full ${change.magnitude >= 0 ? 'bg-gradient-to-r from-emerald-400 to-cyan-400' : 'bg-gradient-to-r from-rose-400 to-orange-400'}`}
-                          style={{ width: `${Math.min(Math.abs(change.magnitude) * 8, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
