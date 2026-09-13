@@ -40,10 +40,10 @@ import {
   YAxis,
 } from 'recharts'
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
-import { Circle, MapContainer, Marker, Polygon, Popup, TileLayer, useMapEvents } from 'react-leaflet'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { imageService } from './services/imageService'
 import { runAnalysis } from './services/analysisService'
+import { SatelliteMap } from './components/SatelliteMap'
 import type { AnalysisHistoryItem, AnalysisMode, AnalysisResult, UploadedImage } from './types'
 
 const modeOptions: Array<{ key: AnalysisMode; label: string; description: string }> = [
@@ -1041,15 +1041,28 @@ function DashboardPage({
           </div>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <MapPreviewPanel
-              detectedObjects={analysisResult?.detected_objects ?? []}
-              imageName={images[0]?.name ?? 'Satellite scene'}
-              geo={currentGeo}
-              layerConfig={mapLayers}
-              onToggleLayer={toggleMapLayer}
-              aoiPoints={aoiPoints}
-              onAoiChange={setAoiPoints}
-            />
+            <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Viewer</p>
+                  <h2 className="text-lg font-semibold text-white">Interactive Satellite Explorer</h2>
+                </div>
+                <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.24em] text-emerald-300">
+                  Live Map
+                </div>
+              </div>
+
+              <SatelliteMap
+                detectedObjects={analysisResult?.detected_objects ?? []}
+                imageName={images[0]?.name ?? 'Satellite scene'}
+                geo={currentGeo}
+                layerConfig={mapLayers}
+                onToggleLayer={toggleMapLayer}
+                aoiPoints={aoiPoints}
+                onAoiChange={setAoiPoints}
+                setQuery={setQuery}
+              />
+            </div>
 
             {analysisResult && (
               <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
@@ -1394,192 +1407,6 @@ function DashboardPage({
         )}
       </section>
     </>
-  )
-}
-
-function MapPreviewPanel({
-  detectedObjects,
-  imageName,
-  geo,
-  layerConfig,
-  onToggleLayer,
-  aoiPoints,
-  onAoiChange,
-}: {
-  detectedObjects: AnalysisResult['detected_objects']
-  imageName: string
-  geo?: Partial<UploadedImage>
-  layerConfig?: {
-    showSatellite: boolean
-    showDetectedObjects: boolean
-    showAOI: boolean
-    showHeatmap: boolean
-  }
-  onToggleLayer?: (key: 'showSatellite' | 'showDetectedObjects' | 'showAOI' | 'showHeatmap') => void
-  aoiPoints?: Array<[number, number]>
-  onAoiChange?: (points: Array<[number, number]>) => void
-}) {
-  const [isDrawingAoi, setIsDrawingAoi] = useState(false)
-
-  const center: [number, number] = [geo?.latitude ?? 20.5937, geo?.longitude ?? 78.9629]
-  const zoom = geo?.zoom ?? 2
-  const showSatellite = layerConfig?.showSatellite ?? true
-  const showDetectedObjects = layerConfig?.showDetectedObjects ?? true
-  const showAOI = layerConfig?.showAOI ?? true
-  const showHeatmap = layerConfig?.showHeatmap ?? true
-  const normalizedAoiPoints = aoiPoints ?? []
-  const aoiAreaKm2 = useMemo(() => estimatePolygonAreaKm2(normalizedAoiPoints), [normalizedAoiPoints])
-
-  const overlayPolygon: Array<[number, number]> = normalizedAoiPoints.length >= 3
-    ? normalizedAoiPoints
-    : detectedObjects.length
-      ? [
-          [center[0] - 0.9, center[1] - 1.6],
-          [center[0] + 0.9, center[1] - 1.2],
-          [center[0] + 1.1, center[1] + 1.6],
-          [center[0] - 0.6, center[1] + 1.8],
-        ]
-      : []
-
-  const MapAoiController = () => {
-    useMapEvents({
-      click(event) {
-        if (!isDrawingAoi) {
-          return
-        }
-
-        const nextPoints = [...normalizedAoiPoints, [event.latlng.lat, event.latlng.lng] as [number, number]]
-        onAoiChange?.(nextPoints)
-      },
-    })
-
-    return null
-  }
-
-  return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-slate-200">
-          <MapPinned className="h-4 w-4 text-blue-400" /> Interactive Satellite Map
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-blue-300">
-            {geo?.regionName ?? 'Map Preview'}
-          </span>
-          {normalizedAoiPoints.length >= 3 && (
-            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-emerald-300">
-              AOI ~ {aoiAreaKm2.toFixed(2)} km²
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        {[
-          { key: 'showSatellite', label: 'Satellite' },
-          { key: 'showHeatmap', label: 'Heatmap' },
-          { key: 'showAOI', label: 'AOI' },
-          { key: 'showDetectedObjects', label: 'Objects' },
-        ].map((toggle) => {
-          const active = layerConfig?.[toggle.key as keyof typeof layerConfig] ?? true
-          return (
-            <button
-              key={toggle.key}
-              type="button"
-              onClick={() => onToggleLayer?.(toggle.key as 'showSatellite' | 'showDetectedObjects' | 'showAOI' | 'showHeatmap')}
-              className={`rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.2em] ${
-                active
-                  ? 'border-blue-500/50 bg-blue-500/10 text-blue-200'
-                  : 'border-slate-700 bg-slate-950 text-slate-400'
-              }`}
-            >
-              {toggle.label}
-            </button>
-          )
-        })}
-      </div>
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setIsDrawingAoi((current) => !current)}
-          className={`rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.2em] ${
-            isDrawingAoi
-              ? 'border-amber-500/50 bg-amber-500/10 text-amber-200'
-              : 'border-slate-700 bg-slate-950 text-slate-400'
-          }`}
-        >
-          {isDrawingAoi ? 'Stop Drawing AOI' : 'Draw AOI'}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onAoiChange?.([])
-            setIsDrawingAoi(false)
-          }}
-          className="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.2em] text-slate-400"
-        >
-          Clear AOI
-        </button>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
-        <div className="h-52 w-full">
-          <MapContainer center={center} zoom={zoom} scrollWheelZoom className="h-full w-full">
-            <MapAoiController />
-            {showSatellite && (
-              <TileLayer
-                attribution='Tiles &copy; Esri, OpenStreetMap contributors'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              />
-            )}
-            {showAOI && overlayPolygon.length > 0 && (
-              <Polygon
-                positions={overlayPolygon}
-                pathOptions={{ color: '#60a5fa', fillColor: '#60a5fa', fillOpacity: 0.17, weight: 1.5 }}
-              />
-            )}
-            {showHeatmap &&
-              detectedObjects.slice(0, 5).map((object, index) => {
-                const lat = center[0] + (index % 2 === 0 ? 0.55 : -0.35) + (index + 1) * 0.12
-                const lng = center[1] + (index % 2 === 0 ? 0.65 : -0.45) + (index + 1) * 0.18
-                const radius = Math.max(18000, Math.min(85000, object.confidence * 900))
-
-                return (
-                  <Circle
-                    key={`${object.id}-heatmap`}
-                    center={[lat, lng]}
-                    radius={radius}
-                    pathOptions={{
-                      color: '#67e8f9',
-                      fillColor: '#67e8f9',
-                      fillOpacity: 0.18,
-                      weight: 1.5,
-                    }}
-                  />
-                )
-              })}
-            {showDetectedObjects &&
-              detectedObjects.slice(0, 5).map((object, index) => {
-                const lat = center[0] + (index % 2 === 0 ? 0.55 : -0.35) + (index + 1) * 0.12
-                const lng = center[1] + (index % 2 === 0 ? 0.65 : -0.45) + (index + 1) * 0.18
-
-                return (
-                  <Marker key={`${object.id}-marker`} position={[lat, lng]}>
-                    <Popup>
-                      <div className="text-sm text-slate-700">
-                        <p className="font-semibold">{object.label}</p>
-                        <p>{imageName}</p>
-                        <p className="text-xs text-slate-500">Confidence: {object.confidence}%</p>
-                      </div>
-                    </Popup>
-                  </Marker>
-                )
-              })}
-          </MapContainer>
-        </div>
-      </div>
-    </div>
   )
 }
 
