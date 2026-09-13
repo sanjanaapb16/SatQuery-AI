@@ -73,6 +73,15 @@ async function callRemoteAnalysisApi({
     data: { session },
   } = await supabase.auth.getSession()
 
+  const preparedImages = await Promise.all(
+    images.map(async (image) => ({
+      id: image.id,
+      name: image.name,
+      imageType: image.imageType,
+      localUrl: await imageToDataUrl(image.localUrl),
+    })),
+  )
+
   const response = await fetch(analysisApiUrl!, {
     method: 'POST',
     headers: {
@@ -82,12 +91,7 @@ async function callRemoteAnalysisApi({
     body: JSON.stringify({
       mode,
       query,
-      images: images.map((image) => ({
-        id: image.id,
-        name: image.name,
-        imageType: image.imageType,
-        localUrl: image.localUrl,
-      })),
+      images: preparedImages,
     }),
   })
 

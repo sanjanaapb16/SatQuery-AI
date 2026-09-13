@@ -66,33 +66,6 @@ const suggestionQuestions = [
   'Calculate the approximate affected area.',
 ]
 
-const initialHistory: AnalysisHistoryItem[] = [
-  {
-    id: 'hist-1',
-    title: 'Urban Growth Analysis',
-    question: 'How much urban expansion occurred?',
-    content: 'The mock AI identified an estimated 13.7% expansion and highlighted new road segments.',
-    created_at: '2026-09-12T10:12:00.000Z',
-    analysis_type: 'urban-growth',
-  },
-  {
-    id: 'hist-2',
-    title: 'Flood Analysis',
-    question: 'Which areas are flooded?',
-    content: 'Likely flood-affected zones were identified near low-lying settlements and river-adjacent fields.',
-    created_at: '2026-09-11T11:05:00.000Z',
-    analysis_type: 'disaster',
-  },
-  {
-    id: 'hist-3',
-    title: 'Agriculture Analysis',
-    question: 'Identify agricultural fields.',
-    content: 'Agricultural plots were segmented with moderate confidence and potential stress regions flagged.',
-    created_at: '2026-09-10T08:39:00.000Z',
-    analysis_type: 'agriculture',
-  },
-]
-
 const demoUser = {
   full_name: 'Demo Researcher',
   email: 'researcher@satquery.ai',
@@ -123,25 +96,16 @@ function SatQueryApp() {
   const [isInitializing, setIsInitializing] = useState(true)
 
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('single')
-  const [images, setImages] = useState<UploadedImage[]>([
-    {
-      id: 'sample-1',
-      name: 'sample-optical.png',
-      size: 1450000,
-      type: 'image/png',
-      imageType: 'optical',
-      localUrl: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=80',
-      uploadedAt: new Date().toISOString(),
-    },
-  ])
-  const [query, setQuery] = useState('Identify all buildings and the major land-cover patterns visible in this image.')
+  const [images, setImages] = useState<UploadedImage[]>([])
+  const [query, setQuery] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
-  const [history, setHistory] = useState<AnalysisHistoryItem[]>(initialHistory)
+  const [history, setHistory] = useState<AnalysisHistoryItem[]>([])
   const [isListening, setIsListening] = useState(false)
   const [voiceError, setVoiceError] = useState('')
   const [voiceSupported, setVoiceSupported] = useState(false)
+  const [selectedLanguage, setSelectedLanguage] = useState<'en' | 'es' | 'fr'>('en')
   const recognitionRef = useRef<any>(null)
 
   useEffect(() => {
@@ -291,6 +255,12 @@ function SatQueryApp() {
 
   const handleAnalyze = async () => {
     if (!query.trim()) {
+      window.alert('Please enter a question before running analysis.')
+      return
+    }
+
+    if (images.length === 0) {
+      window.alert('Please upload at least one image before running analysis.')
       return
     }
 
@@ -576,6 +546,8 @@ function SatQueryApp() {
                 stopVoiceInput={stopVoiceInput}
                 speakAnalysisResult={speakAnalysisResult}
                 stopVoiceAnswer={stopVoiceAnswer}
+                selectedLanguage={selectedLanguage}
+                setSelectedLanguage={setSelectedLanguage}
               />
             }
           />
@@ -692,6 +664,8 @@ function DashboardPage({
   stopVoiceInput,
   speakAnalysisResult,
   stopVoiceAnswer,
+  selectedLanguage,
+  setSelectedLanguage,
 }: {
   analysisMode: AnalysisMode
   setAnalysisMode: (mode: AnalysisMode) => void
@@ -715,6 +689,8 @@ function DashboardPage({
   stopVoiceInput: () => void
   speakAnalysisResult: () => void
   stopVoiceAnswer: () => void
+  selectedLanguage: 'en' | 'es' | 'fr'
+  setSelectedLanguage: (language: 'en' | 'es' | 'fr') => void
 }) {
   const landCoverData = analysisResult?.land_cover_result ?? [
     { label: 'Agriculture', percentage: 38.4, color: '#34d399' },
@@ -814,17 +790,45 @@ function DashboardPage({
               <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Viewer</p>
               <h2 className="text-lg font-semibold text-white">{latestMode.label}</h2>
             </div>
-            <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
-              {isSupabaseConfigured ? 'Supabase Connected' : 'Demo Mode Active'}
+            <div className="flex items-center gap-2">
+              <label className="text-xs uppercase tracking-[0.18em] text-slate-400">Language</label>
+              <select
+                value={selectedLanguage}
+                onChange={(event) => setSelectedLanguage(event.target.value as 'en' | 'es' | 'fr')}
+                className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 outline-none"
+              >
+                <option value="en">English</option>
+                <option value="es">Español</option>
+                <option value="fr">Français</option>
+              </select>
+              <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
+                {isSupabaseConfigured ? 'Supabase Connected' : 'Demo Mode Active'}
+              </div>
             </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             {images.length > 0 ? (
               images.map((image) => (
-                <div key={image.id} className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950">
+                <div key={image.id} className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-950">
                   <div className="relative h-56">
                     <img src={image.localUrl} alt={image.name} className="h-full w-full object-cover" />
+                    {analysisResult?.detected_objects.map((object) => (
+                      <div
+                        key={`${image.id}-${object.id}`}
+                        className="absolute rounded-xl border-2 border-cyan-300/90 bg-cyan-400/10"
+                        style={{
+                          left: `${Math.min(Math.max((object.x / 100) * 100, 4), 96)}%`,
+                          top: `${Math.min(Math.max((object.y / 100) * 100, 4), 96)}%`,
+                          width: `${Math.min(Math.max((object.width / 100) * 100, 8), 30)}%`,
+                          height: `${Math.min(Math.max((object.height / 100) * 100, 8), 30)}%`,
+                        }}
+                      >
+                        <span className="absolute -top-6 left-0 rounded-full bg-slate-950/90 px-2 py-1 text-[10px] font-medium text-cyan-200">
+                          {object.label}
+                        </span>
+                      </div>
+                    ))}
                     <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-slate-950 to-transparent px-4 pb-3 pt-12">
                       <span className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-200">
                         {image.imageType}
@@ -840,6 +844,55 @@ function DashboardPage({
               </div>
             )}
           </div>
+
+          {analysisResult && (
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-slate-200"><MapPinned className="h-4 w-4 text-blue-400" /> Interactive Satellite Map</div>
+                  <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-blue-300">Live Overlay</span>
+                </div>
+                <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+                  <img src={images[0]?.localUrl} alt="Satellite map preview" className="h-52 w-full object-cover opacity-90" />
+                  {analysisResult.detected_objects.slice(0, 5).map((object) => (
+                    <div
+                      key={`map-${object.id}`}
+                      className="absolute rounded-lg border border-violet-300 bg-violet-400/15"
+                      style={{
+                        left: `${Math.min(Math.max((object.x / 100) * 100, 4), 94)}%`,
+                        top: `${Math.min(Math.max((object.y / 100) * 100, 8), 84)}%`,
+                        width: `${Math.min(Math.max((object.width / 100) * 100, 10), 26)}%`,
+                        height: `${Math.min(Math.max((object.height / 100) * 100, 10), 22)}%`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-slate-200"><BarChart3 className="h-4 w-4 text-emerald-400" /> AI Change Heatmap</div>
+                  <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-emerald-300">Change Index</span>
+                </div>
+                <div className="space-y-3">
+                  {analysisResult.detected_changes.map((change) => (
+                    <div key={change.id}>
+                      <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
+                        <span>{change.label}</span>
+                        <span className={change.magnitude >= 0 ? 'text-emerald-300' : 'text-rose-300'}>{change.magnitude}%</span>
+                      </div>
+                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className={`h-full rounded-full ${change.magnitude >= 0 ? 'bg-gradient-to-r from-emerald-400 to-cyan-400' : 'bg-gradient-to-r from-rose-400 to-orange-400'}`}
+                          style={{ width: `${Math.min(Math.abs(change.magnitude) * 8, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-6 grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">

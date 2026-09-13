@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -161,7 +162,7 @@ async function storeAnalysisResult(
   return analysis
 }
 
-serve(async (req) => {
+serve(async (req: Request) => {
   if (!supabaseUrl || !serviceRoleKey) {
     return new Response(
       JSON.stringify({
